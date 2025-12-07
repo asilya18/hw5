@@ -18,7 +18,7 @@ public class SocketMessageInputStream extends InputStream {
 
     public SocketMessage readSocketMessage() throws IOException {
         byte[] lengthBytes = new byte[2];
-        if (inputStream.read(lengthBytes) == -1) { // читаем два байта заголовка
+        if (inputStream.read(lengthBytes) == -1) { // пытаемся прочитать два байта заголовка
             throw new EOFException();
         }
         int messageLength = (lengthBytes[0] & 0xFF) + ((lengthBytes[1] & 0xFF) << 8); // считаем длину сообщения

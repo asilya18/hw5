@@ -33,37 +33,50 @@ public class ChatClient {
         startMessageWriter();
     }
 
-    private boolean connectToServer(){
+    private boolean connectToServer() {
         System.out.println("подключаемся к серверу...");
 
         try {
             BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 
-            System.out.println("введите адрес сервера: ");
-            String address = reader.readLine();
-
-            // пока не введут корректный порт
             while (true) {
-                System.out.println("введите порт сервера: ");
-                try {
-                    int port = Integer.parseInt(reader.readLine());
+                String address = "localhost";
+                System.out.println("введите адрес сервера [по умолчанию: localhost]: ");
+                String addressInput = reader.readLine();
+                if (!addressInput.trim().isEmpty()) {
+                    address = addressInput;
+                }
 
-                    try {
-                        socket = new Socket(address, port);
-                        inputStream = new SocketMessageInputStream(socket.getInputStream());
-                        outputStream = new SocketMessageOutputStream(socket.getOutputStream());
+                // пока не введут корректный порт
+                while (true) {
+                    System.out.println("введите порт сервера (или 'назад' для смены адреса): ");
+                    String portInput = reader.readLine();
 
-                        connected = true;
-                        System.out.println("вы подключились к серверу");
-                        return true;
-
-                    } catch (IOException e) {
-                        System.out.println("не удалось подключиться: " + e.getMessage());
-                        System.out.println("попробуйте другой порт:");
+                    if (portInput.trim().equalsIgnoreCase("назад")) {
+                        System.out.println("возвращаемся к выбору адреса...");
+                        break;
                     }
 
-                } catch (NumberFormatException e) {
-                    System.out.println("неверный формат порта. введите число:");
+                    try {
+                        int port = Integer.parseInt(portInput);
+
+                        try {
+                            socket = new Socket(address, port);
+                            inputStream = new SocketMessageInputStream(socket.getInputStream());
+                            outputStream = new SocketMessageOutputStream(socket.getOutputStream());
+
+                            connected = true;
+                            System.out.println("вы подключились к серверу " + address + ":" + port);
+                            return true;
+
+                        } catch (IOException e) {
+                            System.out.println("не удалось подключиться к " + address + ":" + port + ": " + e.getMessage());
+                            System.out.println("попробуйте другой порт или введите 'назад' для смены адреса");
+                        }
+
+                    } catch (NumberFormatException e) {
+                        System.out.println("неверный формат порта. введите число или 'назад' для смены адреса:");
+                    }
                 }
             }
 
@@ -111,6 +124,7 @@ public class ChatClient {
         });
 
         readerThread.setDaemon(true);
+        // после прерывания этого потока весь main прерывается
         readerThread.start();
     }
 
@@ -121,7 +135,7 @@ public class ChatClient {
             BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 
             while (connected) {
-                String input = reader.readLine();
+                String input = reader.readLine(); // читаем с консоли
 
                 if (!connected) {
                     break;
@@ -133,6 +147,7 @@ public class ChatClient {
                 }
 
                 outputStream.writeSocketMessage(new SocketMessage(input));
+                // если не exit, отправляем сообщение на сервер
             }
 
         } catch (IOException e) {

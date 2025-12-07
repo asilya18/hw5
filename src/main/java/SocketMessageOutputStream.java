@@ -14,7 +14,7 @@ public class SocketMessageOutputStream extends OutputStream {
     }
 
     public void writeSocketMessage(SocketMessage socketMessage) throws IOException {
-        outputStream.write(socketMessage.getMessageLength());
-        outputStream.write(socketMessage.getMessageData());
+        outputStream.write(socketMessage.getMessageLength()); // отправляем два байта в сокет
+        outputStream.write(socketMessage.getMessageData()); // отправляем тело в сокет
     }
 }

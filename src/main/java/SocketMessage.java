@@ -7,7 +7,7 @@ public class SocketMessage {
     // для отправки сообщений
     public SocketMessage(String data){
         this.messageData = data.getBytes(StandardCharsets.UTF_8); // кодируем
-        int dataLength = messageData.length; // определеяем длину по байтам
+        int dataLength = messageData.length; // определяем длину по байтам
         this.messageLength = new byte[2];
         messageLength[0] = (byte) (dataLength); // младший байт
         messageLength[1] = (byte) (dataLength >> 8); // старший байт

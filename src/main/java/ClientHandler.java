@@ -33,6 +33,10 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
+                if (text.trim().isEmpty()) {
+                    continue; // пропускаем пустое сообщение
+                }
+
                 if (text.getBytes(StandardCharsets.UTF_8).length > 256) {
                     send(new SocketMessage("ошибка: слишком длинное сообщение"));
                     continue; // не рассылаем сообщение такой длины
