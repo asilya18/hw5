@@ -30,7 +30,7 @@
         <profile>
             <id>server</id>
             <properties>
-                <exec.mainClass>ChatServer</exec.mainClass>
+                <exec.mainClass>nio.ChatServerNio</exec.mainClass>
             </properties>
         </profile>
 
@@ -38,7 +38,7 @@
         <profile>
             <id>client</id>
             <properties>
-                <exec.mainClass>ChatClient</exec.mainClass>
+                <exec.mainClass>nio.ChatClient</exec.mainClass>
             </properties>
         </profile>
     </profiles>
