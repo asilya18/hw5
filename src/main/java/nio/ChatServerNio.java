@@ -180,21 +180,26 @@ public class ChatServerNio {
     private static void broadcast(String message, SocketChannel sender, Selector selector) {
         try {
             ByteBuffer byteBuffer = ByteBuffer.wrap((message + "\n").getBytes(StandardCharsets.UTF_8));
-
             // перебираем ключи, каждый ключ соответствует зарегистрированному каналу
             for (SelectionKey key : selector.keys()) {
-                // проверяем, что канал клиентский
-                if (key.channel() instanceof SocketChannel) {
-                    SocketChannel client = (SocketChannel) key.channel();
+                // пропускаем невалидные ключи и серверный канал
+                if (!key.isValid() || !(key.channel() instanceof SocketChannel)) {
+                    continue;
+                }
 
-                    if (client.isOpen()) {
+                SocketChannel client = (SocketChannel) key.channel();
+
+                if (client.isOpen() && client.isConnected()) {
+                    try {
                         // duplicate() нужен чтобы все клиенты получили сообщение,
                         // иначе после первой записи position = limit
                         client.write(byteBuffer.duplicate());
+                    } catch (IOException e) {
+                        System.out.println("не удалось отправить сообщение клиенту: " + e.getMessage());
                     }
                 }
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.out.println("ошибка при рассылке сообщения: " + e.getMessage());
         }
     }
@@ -204,7 +209,9 @@ public class ChatServerNio {
         clients.remove(clientChannel);
 
         try {
-            clientChannel.close();
+            if (clientChannel.isOpen()) {
+                clientChannel.close();
+            }
         } catch (IOException e) {
             System.out.println("ошибка при закрытии канала: " + e.getMessage());
         }

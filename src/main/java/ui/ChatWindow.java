@@ -8,7 +8,7 @@ import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 import java.awt.*;
 
-public class ChatWindow extends JFrame {
+public class ChatWindow extends JFrame implements ChatClient.MessageListener {
     private final ChatClient client;
     private final JTextPane chatPane;
     private final JTextField inputField;
@@ -17,6 +17,9 @@ public class ChatWindow extends JFrame {
 
     public ChatWindow(ChatClient client) {
         this.client = client;
+        // регистрируем это окно как слушателя сообщений
+        this.client.addMessageListener(this);
+
         setTitle("чатик");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(800, 600);
@@ -43,10 +46,25 @@ public class ChatWindow extends JFrame {
         add(scrollPane, BorderLayout.CENTER);
         add(inputPanel, BorderLayout.SOUTH);
 
-        // обработчики
+        // обработчики кнопок
         sendButton.addActionListener(e -> sendMessage());
         inputField.addActionListener(e -> sendMessage()); // отправка по enter
         exitButton.addActionListener(e -> exitChat());
+    }
+
+    @Override
+    public void onMessageReceived(String message) {
+        // обновляем UI в потоке Swing
+        SwingUtilities.invokeLater(() -> appendMessage(message));
+    }
+
+    @Override
+    public void onConnectionLost(String reason) {
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(this, reason, "соединение потеряно",
+                    JOptionPane.WARNING_MESSAGE);
+            exitChat();
+        });
     }
 
     private void sendMessage() {
@@ -58,6 +76,8 @@ public class ChatWindow extends JFrame {
     }
 
     private void exitChat() {
+        // удаляем себя из слушателей перед выходом
+        client.removeMessageListener(this);
         client.sendMessage("exit");
         client.disconnect();
         dispose();
@@ -66,6 +86,7 @@ public class ChatWindow extends JFrame {
     public void appendMessage(String message) {
         StyledDocument document = chatPane.getStyledDocument();
 
+        // создаем стиль для имени
         Style nameStyle = chatPane.getStyle("NameStyle");
         if (nameStyle == null) {
             nameStyle = chatPane.addStyle("NameStyle", null);
@@ -73,6 +94,7 @@ public class ChatWindow extends JFrame {
             StyleConstants.setBold(nameStyle, true);
         }
 
+        // создаем стиль для сообщений
         Style msgStyle = chatPane.getStyle("MsgStyle");
         if (msgStyle == null) {
             msgStyle = chatPane.addStyle("MsgStyle", null);

@@ -26,9 +26,9 @@ public class ConnectWindow extends JFrame {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
         // добавление элементов на панель
-        panel.add(new JLabel("Адрес сервера:"));
+        panel.add(new JLabel("адрес сервера:"));
         panel.add(addressField);
-        panel.add(new JLabel("Порт:"));
+        panel.add(new JLabel("порт:"));
         panel.add(portField);
         panel.add(connectButton);
 
