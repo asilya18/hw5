@@ -7,6 +7,7 @@ import javax.swing.text.Style;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 import java.awt.*;
+import java.util.List;
 
 public class ChatWindow extends JFrame implements ChatClient.MessageListener {
     private final ChatClient client;
@@ -14,13 +15,20 @@ public class ChatWindow extends JFrame implements ChatClient.MessageListener {
     private final JTextField inputField;
     private final JButton sendButton;
     private final JButton exitButton;
+    private String roomName; // храним название комнаты
 
     public ChatWindow(ChatClient client) {
+        this(client, ""); // по умолчанию без названия комнаты
+    }
+
+    public ChatWindow(ChatClient client, String roomName) {
         this.client = client;
+        this.roomName = roomName;
         // регистрируем это окно как слушателя сообщений
         this.client.addMessageListener(this);
 
-        setTitle("чатик");
+        // устанавливаем заголовок с названием комнаты
+        setTitle("чатик" + (roomName != null && !roomName.isEmpty() ? " - " + roomName : ""));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(800, 600);
         setLocationRelativeTo(null);
@@ -67,6 +75,13 @@ public class ChatWindow extends JFrame implements ChatClient.MessageListener {
         });
     }
 
+    // ДОБАВЛЯЕМ ЭТОТ МЕТОД - он требуется по интерфейсу MessageListener
+    @Override
+    public void onRoomListReceived(List<String> rooms) {
+        // этот метод не используется в окне чата,
+        // но мы должны его реализовать по контракту интерфейса
+    }
+
     private void sendMessage() {
         String message = inputField.getText().trim();
         if (!message.isEmpty()) {
@@ -83,7 +98,7 @@ public class ChatWindow extends JFrame implements ChatClient.MessageListener {
         dispose();
     }
 
-    public void appendMessage(String message) {
+    private void appendMessage(String message) {
         StyledDocument document = chatPane.getStyledDocument();
 
         // создаем стиль для имени
@@ -101,25 +116,51 @@ public class ChatWindow extends JFrame implements ChatClient.MessageListener {
             StyleConstants.setForeground(msgStyle, Color.BLACK);
         }
 
-        int closingBracketIndex = message.indexOf("]");
-        if (message.startsWith("[") && closingBracketIndex > 0) {
-            String nameTag = message.substring(0, closingBracketIndex + 1); // [имя]
-            String msg = message.substring(closingBracketIndex + 1).trim();
+        // создаем стиль для системных сообщений
+        Style systemStyle = chatPane.getStyle("SystemStyle");
+        if (systemStyle == null) {
+            systemStyle = chatPane.addStyle("SystemStyle", null);
+            StyleConstants.setForeground(systemStyle, Color.GRAY);
+            StyleConstants.setItalic(systemStyle, true);
+        }
 
+        // проверяем на системное сообщение (без имени в квадратных скобках)
+        if (!message.contains("[") || message.indexOf("]") <= 0) {
+            // системное сообщение
             try {
-                document.insertString(document.getLength(), nameTag + " ", nameStyle);
-                document.insertString(document.getLength(), msg + "\n", msgStyle);
+                document.insertString(document.getLength(), message + "\n", systemStyle);
             } catch (BadLocationException e) {
                 e.printStackTrace();
             }
         } else {
-            try {
-                document.insertString(document.getLength(), message + "\n", msgStyle);
-            } catch (BadLocationException e) {
-                e.printStackTrace();
+            // обычное сообщение с именем
+            int closingBracketIndex = message.indexOf("]");
+            if (message.startsWith("[") && closingBracketIndex > 0) {
+                String nameTag = message.substring(0, closingBracketIndex + 1); // [имя]
+                String msg = message.substring(closingBracketIndex + 1).trim();
+
+                try {
+                    document.insertString(document.getLength(), nameTag + " ", nameStyle);
+                    document.insertString(document.getLength(), msg + "\n", msgStyle);
+                } catch (BadLocationException e) {
+                    e.printStackTrace();
+                }
+            } else {
+                // сообщение без формата
+                try {
+                    document.insertString(document.getLength(), message + "\n", msgStyle);
+                } catch (BadLocationException e) {
+                    e.printStackTrace();
+                }
             }
         }
 
         chatPane.setCaretPosition(document.getLength()); // прокрутка вниз
+    }
+
+    // метод для обновления названия комнаты (если нужно будет менять динамически)
+    public void setRoomName(String roomName) {
+        this.roomName = roomName;
+        setTitle("чатик" + (roomName != null && !roomName.isEmpty() ? " - " + roomName : ""));
     }
 }

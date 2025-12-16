@@ -11,11 +11,18 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public class ChatServerNio {
-    private static final Map<SocketChannel, String> clients = new HashMap<>();
-    private static final int MAX_CLIENTS = 10;
+    // имя клиента - канал
+    private static final Map<SocketChannel, String> clientNames = new HashMap<>();
+    // комната - множество каналов в этой комнате
+    private static final Map<String, Set<SocketChannel>> rooms = new HashMap<>();
+    // канал - текущая комната клиента
+    private static final Map<SocketChannel, String> clientRooms = new HashMap<>();
+    private static final int MAX_CLIENTS = 50;
 
     public static void main(String[] args) {
         try {
@@ -54,7 +61,6 @@ public class ChatServerNio {
     private static int askPort() {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         int port = 0;
-
         while (true) {
             try {
                 System.out.println("введите порт сервера");
@@ -90,7 +96,7 @@ public class ChatServerNio {
             // принимаем новый клиентский канал
             SocketChannel socketChannel = serverSocketChannel.accept();
 
-            if (clients.size() > MAX_CLIENTS) {
+            if (clientNames.size() > MAX_CLIENTS) {
                 System.out.println("превышен лимит клиентов. подключение отклонено");
                 socketChannel.close();
                 return;
@@ -102,7 +108,7 @@ public class ChatServerNio {
             // указываем, что клиентский канал должен читать данные от клиента
             socketChannel.register(selector, SelectionKey.OP_READ);
 
-            sendMessage(socketChannel, "введите ваше имя: ");
+            sendMessage(socketChannel, "SYSTEM:введите ваше имя:");
             System.out.println("новое подключение: " + socketChannel.getRemoteAddress());
         } catch (IOException e) {
             System.out.println("ошибка при принятии соединения: " + e.getMessage());
@@ -111,93 +117,191 @@ public class ChatServerNio {
 
     private static void processMessage(SocketChannel clientChannel, Selector selector) {
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-
         try {
             int readBytes = clientChannel.read(buffer);
-
             if (readBytes == -1) {
                 disconnectClient(clientChannel, selector);
                 return;
             }
-
             if (readBytes > 0) {
                 buffer.flip();
                 byte[] bytes = new byte[readBytes];
                 buffer.get(bytes);
                 String text = new String(bytes, StandardCharsets.UTF_8).trim();
 
-                // если клиента ещё нет в списке — это его имя
-                if (!clients.containsKey(clientChannel)) {
-                    clients.put(clientChannel, text);
-                    broadcast(text + " присоединился к чату", clientChannel, selector);
-                    System.out.println(text + " подключился");
-                    return;
+                // парсим протокол сообщений от клиента
+                if (text.contains(":")) {
+                    String[] parts = text.split(":", 2);
+                    String type = parts[0];
+                    String data = parts.length > 1 ? parts[1] : "";
+
+                    switch (type) {
+                        case "NAME":
+                            handleName(clientChannel, data, selector);
+                            break;
+                        case "CREATE":
+                            handleCreate(clientChannel, data, selector);
+                            break;
+                        case "JOIN":
+                            handleJoin(clientChannel, data, selector);
+                            break;
+                        case "LEAVE":
+                            handleLeave(clientChannel, selector);
+                            break;
+                        case "MESSAGE":
+                            handleMessage(clientChannel, data, selector);
+                            break;
+                        case "LIST":
+                            handleList(clientChannel);
+                            break;
+                        default:
+                            sendMessage(clientChannel, "SYSTEM: неизвестная команда");
+                    }
                 }
-
-                String clientName = clients.get(clientChannel);
-
-                if (text.equalsIgnoreCase("exit")) {
-                    disconnectClient(clientChannel, selector);
-                    return;
-                }
-
-                if (text.isEmpty()) {
-                    return;
-                }
-
-                if (text.getBytes(StandardCharsets.UTF_8).length > 1024) {
-                    sendMessage(clientChannel, "ошибка: сообщение слишком длинное");
-                    return;
-                }
-
-                String formatted = "[" + clientName + "] " + text;
-                broadcast(formatted, clientChannel, selector);
-                System.out.println(formatted);
             }
         } catch (IOException e) {
             System.out.println("ошибка при обработке сообщения: " + e.getMessage());
-            try {
-                clientChannel.close();
-            } catch (IOException ex) {
-                System.out.println("ошибка при закрытии канала клиента: " + ex.getMessage());
-            }
+            disconnectClient(clientChannel, selector);
         }
+    }
+
+    private static void handleName(SocketChannel clientChannel, String name, Selector selector) {
+        if (clientNames.containsKey(clientChannel)) {
+            sendMessage(clientChannel, "SYSTEM: вы уже зарегистрированы");
+            return;
+        }
+        clientNames.put(clientChannel, name);
+        System.out.println(name + " подключился");
+        // отправляем список комнат при регистрации (будет пустым, если нет комнат)
+        sendRoomList(clientChannel);
+    }
+
+    private static void handleCreate(SocketChannel clientChannel, String roomName, Selector selector) {
+        if (!clientNames.containsKey(clientChannel)) {
+            sendMessage(clientChannel, "SYSTEM: сначала зарегистрируйтесь");
+            return;
+        }
+
+        if (rooms.containsKey(roomName)) {
+            sendMessage(clientChannel, "SYSTEM: комната уже существует");
+            return;
+        }
+
+        rooms.put(roomName, new HashSet<>());
+        String clientName = clientNames.get(clientChannel);
+        System.out.println("создана комната: " + roomName + " от " + clientName);
+
+        sendMessage(clientChannel, "SYSTEM: вы создали комнату: " + roomName);
+        sendRoomList(clientChannel);
+    }
+
+    private static void handleJoin(SocketChannel clientChannel, String roomName, Selector selector) {
+        if (!clientNames.containsKey(clientChannel)) {
+            sendMessage(clientChannel, "SYSTEM: cначала зарегистрируйтесь");
+            return;
+        }
+
+        if (!rooms.containsKey(roomName)) {
+            sendMessage(clientChannel, "SYSTEM: комната не существует");
+            return;
+        }
+
+        // покидаем старую комнату если была
+        handleLeave(clientChannel, selector);
+
+        // входим в новую
+        rooms.get(roomName).add(clientChannel);
+        clientRooms.put(clientChannel, roomName);
+
+        String clientName = clientNames.get(clientChannel);
+        broadcastToRoom("SYSTEM:" + clientName + " присоединился к комнате", roomName, clientChannel, selector);
+        sendMessage(clientChannel, "SYSTEM: вы в комнате: " + roomName);
+        System.out.println(clientName + " вошел в комнату: " + roomName);
+    }
+
+    private static void handleLeave(SocketChannel clientChannel, Selector selector) {
+        if (clientRooms.containsKey(clientChannel)) {
+            String roomName = clientRooms.get(clientChannel);
+            String clientName = clientNames.get(clientChannel);
+
+            rooms.get(roomName).remove(clientChannel);
+            clientRooms.remove(clientChannel);
+
+            broadcastToRoom("SYSTEM:" + clientName + " покинул комнату", roomName, null, selector);
+            System.out.println(clientName + " покинул комнату: " + roomName);
+        }
+    }
+
+    private static void handleMessage(SocketChannel clientChannel, String message, Selector selector) {
+        if (!clientNames.containsKey(clientChannel)) {
+            sendMessage(clientChannel, "SYSTEM: сначала зарегистрируйтесь");
+            return;
+        }
+
+        String clientName = clientNames.get(clientChannel);
+        String roomName = clientRooms.get(clientChannel);
+
+        if (roomName == null) {
+            sendMessage(clientChannel, "SYSTEM: сначала войдите в комнату");
+            return;
+        }
+
+        if (message.isEmpty()) {
+            return;
+        }
+
+        if (message.getBytes(StandardCharsets.UTF_8).length > 1024) {
+            sendMessage(clientChannel, "SYSTEM: сообщение слишком длинное");
+            return;
+        }
+
+        String formatted = "MESSAGE:[" + clientName + "] " + message;
+        broadcastToRoom(formatted, roomName, clientChannel, selector);
+        System.out.println("[" + roomName + "] " + clientName + ": " + message);
+    }
+
+    private static void handleList(SocketChannel clientChannel) {
+        sendRoomList(clientChannel);
+    }
+
+
+    private static void sendRoomList(SocketChannel clientChannel) {
+        StringBuilder list = new StringBuilder("LIST:");
+        for (String roomName : rooms.keySet()) {
+            int count = rooms.get(roomName).size(); // кол-во клиентов в комнате
+            list.append(roomName).append("(").append(count).append(");");
+        }
+        sendMessage(clientChannel, list.toString());
     }
 
     private static void sendMessage(SocketChannel clientChannel, String message) {
         try {
-            // метод wrap() в байтовом виде заворачивает в буфер сообщение
-            // добавляем перевод строки, чтобы клиент мог считать через readLine()
             ByteBuffer byteBuffer = ByteBuffer.wrap((message + "\n").getBytes(StandardCharsets.UTF_8));
-
-            // записываем сообщение в канал из буфера
             clientChannel.write(byteBuffer);
         } catch (IOException e) {
             System.out.println("ошибка при отправке сообщения: " + e.getMessage());
         }
     }
 
-    private static void broadcast(String message, SocketChannel sender, Selector selector) {
+    private static void broadcastToRoom(String message, String roomName, SocketChannel sender, Selector selector) {
         try {
             ByteBuffer byteBuffer = ByteBuffer.wrap((message + "\n").getBytes(StandardCharsets.UTF_8));
-            // перебираем ключи, каждый ключ соответствует зарегистрированному каналу
-            for (SelectionKey key : selector.keys()) {
-                // пропускаем невалидные ключи и серверный канал
-                if (!key.isValid() || !(key.channel() instanceof SocketChannel)) {
-                    continue;
-                }
+            Set<SocketChannel> roomClients = rooms.get(roomName);
 
-                SocketChannel client = (SocketChannel) key.channel();
-
-                if (client.isOpen() && client.isConnected()) {
-                    try {
-                        // duplicate() нужен чтобы все клиенты получили сообщение,
-                        // иначе после первой записи position = limit
-                        client.write(byteBuffer.duplicate());
-                    } catch (IOException e) {
-                        System.out.println("не удалось отправить сообщение клиенту: " + e.getMessage());
+            if (roomClients != null) {
+                for (SocketChannel client : roomClients) {
+                    if (client != sender && client.isOpen() && client.isConnected()) {
+                        try {
+                            client.write(byteBuffer.duplicate());
+                        } catch (IOException e) {
+                            System.out.println("не удалось отправить сообщение клиенту: " + e.getMessage());
+                        }
                     }
                 }
+            }
+            // отправляем отправителю тоже (кроме системных сообщений)
+            if (sender != null && !message.startsWith("SYSTEM:") && sender.isOpen() && sender.isConnected()) {
+                sender.write(byteBuffer.duplicate());
             }
         } catch (Exception e) {
             System.out.println("ошибка при рассылке сообщения: " + e.getMessage());
@@ -205,9 +309,11 @@ public class ChatServerNio {
     }
 
     private static void disconnectClient(SocketChannel clientChannel, Selector selector) {
-        String clientName = clients.get(clientChannel);
-        clients.remove(clientChannel);
-
+        String clientName = clientNames.get(clientChannel);
+        // покидаем комнату
+        handleLeave(clientChannel, selector);
+        clientNames.remove(clientChannel);
+        clientRooms.remove(clientChannel);
         try {
             if (clientChannel.isOpen()) {
                 clientChannel.close();
@@ -217,7 +323,6 @@ public class ChatServerNio {
         }
 
         if (clientName != null) {
-            broadcast(clientName + " покинул чат", clientChannel, selector);
             System.out.println(clientName + " отсоединился");
         }
     }

@@ -1,5 +1,7 @@
 package nio;
 
+import ui.RoomWindow;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -15,6 +17,7 @@ public class ChatClient {
     private BufferedReader in;
     private PrintWriter out;
     private String clientName;
+    private String currentRoom;
     private boolean connected = false;
     private final List<MessageListener> messageListeners = new ArrayList<>();
 
@@ -22,6 +25,7 @@ public class ChatClient {
     public interface MessageListener {
         void onMessageReceived(String message); // сообщение от сервера
         void onConnectionLost(String reason); // соединение с сервером прервано
+        void onRoomListReceived(List<String> rooms); // получен список комнат
     }
 
     // методы для регистрации слушателей
@@ -47,11 +51,17 @@ public class ChatClient {
         }
     }
 
+    // уведомление о списке комнат
+    private void notifyRoomListReceived(List<String> rooms) {
+        for (MessageListener listener : messageListeners) {
+            listener.onRoomListReceived(rooms);
+        }
+    }
+
     public static void main(String[] args) {
         ChatClient client = new ChatClient();
         client.showConnectWindow();
     }
-
 
     public boolean connectToServer(String address, int port) {
         try {
@@ -60,6 +70,11 @@ public class ChatClient {
             out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
             connected = true;
             System.out.println("вы подключились к серверу " + address + ":" + port);
+            startMessageReader();
+            String prompt = in.readLine();
+            if (prompt != null && prompt.startsWith("SYSTEM:")) {
+                System.out.println("cервер: " + prompt.substring(7));
+            }
             return true;
         } catch (IOException e) {
             System.out.println("не удалось подключиться: " + e.getMessage());
@@ -69,16 +84,30 @@ public class ChatClient {
 
     public boolean authenticate(String name) {
         try {
-            String prompt = in.readLine(); // чтение потока байтов из сокета от сервера (запрос имени)
-            System.out.println(prompt);
             clientName = name;
-            out.println(clientName); // отправляем имя
-            System.out.println(clientName + ", вы в чате");
+            out.println("NAME:" + clientName);
+            System.out.println(clientName + ", вы зарегистрированы");
             return true;
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.out.println("ошибка при регистрации: " + e.getMessage());
             return false;
         }
+    }
+
+    private void parseRoomList(String listStr) {
+        // получаем от сервера сообщение типа
+        // LIST:Комната1(2);Комната2(0);Комната3(1);
+        List<String> rooms = new ArrayList<>();
+        if (listStr != null && !listStr.isEmpty()) {
+            String[] roomEntries = listStr.split(";");
+            for (String entry : roomEntries) {
+                if (!entry.trim().isEmpty()) {
+                    // формируем список комнат
+                    rooms.add(entry.trim());
+                }
+            }
+        }
+        notifyRoomListReceived(rooms); // передаем полученный списко слушателям
     }
 
     // слушатель серверных сообщений
@@ -87,8 +116,19 @@ public class ChatClient {
             try {
                 String line;
                 while (connected && (line = in.readLine()) != null) {
-                    // уведомляем всех слушателей о новом сообщении
-                    notifyMessageReceived(line);
+                    System.out.println("сообщение от сервера: " + line);
+                    // обрабатываем разные типы сообщений
+                    if (line.startsWith("LIST:")) {
+                        parseRoomList(line.substring(5));
+                    } else if (line.startsWith("SYSTEM:")) {
+                        // системные сообщения тоже показываем в чате (кто-то покинул/присоединился к чату)
+                        notifyMessageReceived(line.substring(7));
+                    } else if (line.startsWith("MESSAGE:")) {
+                        notifyMessageReceived(line.substring(8));
+                    } else {
+                        // старый формат или другие сообщения
+                        notifyMessageReceived(line);
+                    }
                 }
             } catch (IOException e) {
                 if (connected) {
@@ -104,7 +144,26 @@ public class ChatClient {
 
     public void sendMessage(String text) {
         if (connected) {
-            out.println(text);
+            out.println("MESSAGE:" + text);
+        }
+    }
+
+    public void createRoom(String roomName) {
+        if (connected) {
+            out.println("CREATE:" + roomName);
+        }
+    }
+
+    public void joinRoom(String roomName) {
+        if (connected) {
+            out.println("JOIN:" + roomName);
+            currentRoom = roomName;
+        }
+    }
+
+    public void requestRoomList() {
+        if (connected) {
+            out.println("LIST:");
         }
     }
 
@@ -112,6 +171,7 @@ public class ChatClient {
         connected = false;
         try {
             if (socket != null && !socket.isClosed()) {
+                out.println("LEAVE:");
                 socket.close();
             }
         } catch (IOException e) {
@@ -136,11 +196,17 @@ public class ChatClient {
         });
     }
 
+    public void showRoomWindow() {
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            RoomWindow roomWindow = new RoomWindow(this);
+            roomWindow.setVisible(true);
+        });
+    }
+
     public void showChatWindow() {
         javax.swing.SwingUtilities.invokeLater(() -> {
             ui.ChatWindow chatWindow = new ui.ChatWindow(this);
             chatWindow.setVisible(true);
-            startMessageReader();
         });
     }
 }

@@ -10,7 +10,7 @@ public class AuthWindow extends JFrame {
 
     public AuthWindow(ChatClient client) {
         this.client = client;
-        setTitle("введите имя");
+        setTitle("как вас зовут ?");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(360, 180);
         setLocationRelativeTo(null);
@@ -38,11 +38,10 @@ public class AuthWindow extends JFrame {
             JOptionPane.showMessageDialog(this, "введите имя", "ошибка", JOptionPane.ERROR_MESSAGE);
             return;
         }
-
         boolean success = client.authenticate(name);
         if (success) {
             dispose();
-            client.showChatWindow();
+            client.showRoomWindow();
         } else {
             JOptionPane.showMessageDialog(this, "не удалось зарегистрироваться", "ошибка", JOptionPane.ERROR_MESSAGE);
         }
